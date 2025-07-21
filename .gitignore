@@ -69,6 +69,7 @@ pids
 .env.test.local
 .env.production.local
 *.env
+*.yml
 
 # ---------------------------------------------------------------------------- #
 # -- Específico de Linguagens/Frameworks (Exemplos)                         -- #

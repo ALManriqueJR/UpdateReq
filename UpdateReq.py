@@ -234,7 +234,7 @@ def verificar_versoes_hibrido():
 
 var_tkJanela: Tk = Tk()
 var_tkJanela.title("Atualizador de requirements.txt")
-var_tkJanela.geometry("800x250")
+var_tkJanela.geometry("600x210")
 var_tkJanela.resizable(False, False)
 var_frameEcra: Frame = Frame(var_tkJanela, padx=10, pady=10)
 var_frameEcra.pack(expand=True, fill=tk.BOTH)
@@ -264,7 +264,7 @@ var_txtCampo: Text = Text(
 var_txtCampo.pack(pady=10)
 
 var_strTip: str = (
-    "Caso caminho do arquivo seja muito longo, pode ao clicar e arrastar para os lados é possivel visualizá-lo."
+    "Caso caminho do arquivo seja muito longo, ao clicar e arrastar para os lados é possivel visualizá-lo."
 )
 
 var_Help: Label = Label(
@@ -278,7 +278,7 @@ var_Help.pack(pady=(0, 10))
 
 var_btnAtualizar: Button = Button(
     var_frameEcra,
-    text="Atualizar o requirements.txt",
+    text="Atualizar",
     command=verificar_versoes_hibrido,
 )
 
