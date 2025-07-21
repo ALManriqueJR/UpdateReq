@@ -10,17 +10,27 @@ from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
+import logging
+from datetime import datetime
 
 # Exclusivos para Type Hints
 from re import Pattern
 from requests.models import Response
 from selenium.webdriver.chrome.webdriver import WebDriver
 from bs4.element import Tag, PageElement
+from selenium.webdriver.remote.webelement import WebElement
 from tkinter import Tk, Frame, Label, Button, Text
 
 var_strCaminho = ""
 var_strPypiUrl = "https://pypi.org/project/"
 var_dictReqUpdated = {}
+
+log_filename = f"log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler(log_filename, "w", "utf-8"), logging.StreamHandler()],
+)
 
 
 def procurar_arquivo() -> None:
@@ -60,12 +70,12 @@ def salvar_requirements(
                 linha = f"{pacote}=={versao}\n"
                 file.write(linha)
 
-        print(f"\nArquivo '{var_pathCaminhoFinal}' criado com sucesso.")
+        logging.info(f"Arquivo '{var_pathCaminhoFinal}' criado com sucesso.")
 
         return str(var_pathCaminhoFinal)
 
     except Exception as e:
-        print(f"Erro ao salvar o arquivo: {e}")
+        logging.critical(f"Erro ao salvar o arquivo: {e}")
         return None
 
 
@@ -74,11 +84,13 @@ def verificar_versoes_hibrido():
     Checagem das versões com requests/bs4 (Fast), e em último caso Selenium (Slow).
     """
     global var_dictReqUpdated
+    global var_dictReqOld
+    var_dictReqOld = {}
     var_dictReqUpdated = {}
 
     if not var_strCaminho:
         messagebox.showwarning(
-            "Aviso", "Selecione um arquivo de requirements primeiro."
+            "Aviso", "Selecione um arquivo de requirements.txt primeiro."
         )
         return
 
@@ -88,14 +100,23 @@ def verificar_versoes_hibrido():
             content = file.read()
 
         var_patternNomePacote: Pattern = re.compile(
-            r"^\s*([A-Za-z][A-Za-z0-9_-]*)", re.MULTILINE
+            r"^\s*([A-Za-z][A-Za-z0-9_-]*)(?:[<>=!~]+([\d.a-zA-Zrc]+))?", re.MULTILINE
         )
-        var_lstNomePacote = var_patternNomePacote.findall(content)
+
+        var_lstMatchs: list = var_patternNomePacote.findall(content)
+
+        for var_lstNomePacote, var_lstVersaoPacote in var_lstMatchs:
+            var_lstNomePacote = var_lstNomePacote.strip()
+            var_lstVersaoPacote = (
+                var_lstVersaoPacote.strip() if var_lstVersaoPacote else "-"
+            )
+            var_dictReqOld[var_lstNomePacote] = var_lstVersaoPacote
+
         var_lstPacotesSelenium = []
 
-        print("\n--- CHECK REQUIREMENTS BEGIN ---")
+        logging.info("*** CHECKING REQUIREMENTS ***")
 
-        for var_strNomePacote in var_lstNomePacote:
+        for var_strNomePacote in var_dictReqOld.keys():
             try:
                 var_strUrl: str = f"{var_strPypiUrl}{var_strNomePacote}/"
                 var_responsePypi: Response = requests.get(var_strUrl, timeout=10)
@@ -115,26 +136,37 @@ def verificar_versoes_hibrido():
                         var_strVersaoPacote: str = var_strNomeVersaoPacote.replace(
                             var_strNomePacote, "", 1
                         ).strip()
-                        print(
-                            f"Pacote: {var_strNomePacote:<30} | Última Versão: {var_strVersaoPacote} (Fast Check)"
+
+                        var_strMsg: str = (
+                            f"{var_strNomePacote:<30} | Versão Usada é a mais atual: {var_dictReqOld[var_strNomePacote]} (Fast Check)"
+                            if var_strVersaoPacote == var_dictReqOld[var_strNomePacote]
+                            else f"{var_strNomePacote:<30} | Versão Usada: {var_dictReqOld[var_strNomePacote]:<30}| Versão Atualizada: {var_strVersaoPacote} (Fast Check)"
                         )
+                        logging.info(var_strMsg)
 
                         var_dictReqUpdated[var_strNomePacote] = var_strVersaoPacote
+
                     else:
                         var_lstPacotesSelenium.append(var_strNomePacote)
                 else:
-                    print(
-                        f"Pacote: {var_strNomePacote:<30} | Status retornado diferente de 200. [Erro {var_responsePypi.status_code}]"
+                    var_strMsg: str = (
+                        f"Pacote: {var_strNomePacote:<30} | Status retornado diferente de 200. [Erro {var_responsePypi.status_code}] (Fast Check Failed)"
                     )
+                    logging.error(var_strMsg)
+
             except requests.exceptions.RequestException:
-                print(f"Pacote: {var_strNomePacote:<30} | [ERRO DE REDE]")
+                logging.critical(
+                    f"Pacote: {var_strNomePacote:<30} | Erro de Rede (Fast Check Fatal Error)"
+                )
                 var_lstPacotesSelenium.append(var_strNomePacote)
 
         if var_lstPacotesSelenium:
             var_wbNav: Optional[WebDriver] = None
             try:
                 chrome_options: Options = Options()
-                chrome_options.add_argument("--user-data-dir=C:/Selenium/ChromeProfile")
+                chrome_options.add_argument(
+                    "--user-data-dir=C:/Selenium/ChromeProfile"
+                )  # Perfil provisorio para o robo
                 var_wbNav = wb.Chrome(options=chrome_options)
                 wait: WebDriverWait = WebDriverWait(var_wbNav, 10)
 
@@ -142,33 +174,39 @@ def verificar_versoes_hibrido():
                     try:
                         var_strUrl: str = f"{var_strPypiUrl}{var_strNomePacote}/"
                         var_wbNav.get(var_strUrl)
-                        header_element = wait.until(
+                        var_weHeaderElement: WebElement = wait.until(
                             EC.presence_of_element_located(
                                 (By.CLASS_NAME, "package-header__name")
                             )
                         )
-                        ar_strNomeVersaoPacote: str = header_element.text
-                        var_strVersaoPacote: str = ar_strNomeVersaoPacote.replace(
+                        var_strNomeVersaoPacote: str = var_weHeaderElement.text
+                        var_strVersaoPacote: str = var_strNomeVersaoPacote.replace(
                             var_strNomePacote, "", 1
                         ).strip()
-                        print(
-                            f"Pacote: {var_strNomePacote:<30} | Última Versão: {var_strVersaoPacote} (Slow Check)"
+
+                        var_strMsg: str = (
+                            f"{var_strNomePacote:<30} | Versão usada é a mais atual: {var_dictReqOld[var_strNomePacote]} (Slow Check)"
+                            if var_strVersaoPacote == var_dictReqOld[var_strNomePacote]
+                            else f"{var_strNomePacote:<30} | Versão Usada: {var_dictReqOld[var_strNomePacote]:<30}| Versão Atualizada: {var_strVersaoPacote} (Slow Check)"
                         )
 
+                        logging.info(var_strMsg)
+
                         var_dictReqUpdated[var_strNomePacote] = var_strVersaoPacote
+
                     except TimeoutException:
-                        print(
-                            f"Pacote: {var_strNomePacote:<30} | [Pacote não encontrado no PyPI ou Tempo de espera excedido]"
+                        logging.critical(
+                            f"Pacote: {var_strNomePacote:<30} | Pacote não encontrado no PyPI ou Tempo de espera excedido (Slow Check)"
                         )
                     except Exception as e:
-                        print(
-                            f"Pacote: {var_strNomePacote:<30} | [ERRO com Selenium: {e}]"
+                        logging.critical(
+                            f"Pacote: {var_strNomePacote:<30} | Erro com Selenium: {e} (Slow Check Fatal Error)"
                         )
             finally:
                 if var_wbNav:
                     var_wbNav.quit()
 
-        print("\n--- CHECK REQUIREMENTS END ---")
+        logging.info("*** REQUIREMENTS CHECKED ***")
 
         if var_dictReqUpdated:
             var_NovoReq = salvar_requirements(var_dictReqUpdated, var_strCaminho)
@@ -187,9 +225,11 @@ def verificar_versoes_hibrido():
             messagebox.showwarning(
                 "Aviso", "Sem sucesso em gerar o requirements atualizado."
             )
+            logging.error("Sem sucesso em gerar o requirements atualizado.")
 
     except Exception as e:
         messagebox.showerror("Erro Crítico", f"Ocorreu um erro inesperado: {e}")
+        logging.critical(f"Erro Crítico: {e}")
 
 
 var_tkJanela: Tk = Tk()
@@ -223,7 +263,6 @@ var_txtCampo: Text = Text(
 )
 var_txtCampo.pack(pady=10)
 
-
 var_strTip: str = (
     "Caso caminho do arquivo seja muito longo, pode ao clicar e arrastar para os lados é possivel visualizá-lo."
 )
@@ -237,7 +276,6 @@ var_Help: Label = Label(
 
 var_Help.pack(pady=(0, 10))
 
-
 var_btnAtualizar: Button = Button(
     var_frameEcra,
     text="Atualizar o requirements.txt",
@@ -245,6 +283,5 @@ var_btnAtualizar: Button = Button(
 )
 
 var_btnAtualizar.pack(pady=1)
-
 
 var_tkJanela.mainloop()
